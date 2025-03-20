@@ -83,24 +83,28 @@ services:
       - TRAEFIK_LOG_FORMAT=${TRAEFIK_LOG_FORMAT}
       - TRAEFIK_ACCESSLOG=true
       - TRAEFIK_ACCESSLOG_FORMAT=json
-      - TRAEFIK_PROVIDERS_CONSULCATALOG_ENDPOINT_ADDRESS=${CONSUL_HTTP_ADDR}
-      - TRAEFIK_PROVIDERS_CONSULCATALOG_ENDPOINT_SCHEME=http
-      - TRAEFIK_PROVIDERS_CONSULCATALOG_EXPOSEDBYDEFAULT=false
-      - TRAEFIK_PROVIDERS_CONSULCATALOG_CONNECTAWARE=true
-      - TRAEFIK_PROVIDERS_CONSULCATALOG_WATCH=true
-      - TRAEFIK_PROVIDERS_CONSULCATALOG_PREFIX=traefik     
       - TRAEFIK_ACCESSLOG_FILEPATH=/var/log/traefik/access.log
+      # Health check endpoint for Traefik
+      - TRAEFIK_PING=true
+      - TRAEFIK_PING_ENTRYPOINT=metrics
+      # Metrics configuration (ensure this is properly defined)
+      - TRAEFIK_METRICS_PROMETHEUS=true
+      - TRAEFIK_METRICS_PROMETHEUS_ENTRYPOINT=metrics
+      - TRAEFIK_METRICS_PROMETHEUS_BUCKETS=0.1,0.3,1.2,5.0
+      # TLS configuration for websecure entrypoint
+      - TRAEFIK_ENTRYPOINTS_WEBSECURE_HTTP_TLS=true
+      - TRAEFIK_ENTRYPOINTS_WEBSECURE_HTTP_TLS_CERTRESOLVER=letsencrypt
     networks:
       - service-mesh
     depends_on:
       consul-server:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "--spider", "http://localhost:${TRAEFIK_DASHBOARD_PORT}/ping"]
+      test: ["CMD-SHELL", "traefik healthcheck"]
       interval: 10s
       timeout: 5s
       retries: 3
-      start_period: 5s
+      start_period: 10s
     restart: unless-stopped
     labels:
       - "traefik.enable=true"
@@ -109,7 +113,7 @@ services:
       - "traefik.http.routers.traefik-dashboard.entrypoints=websecure"
 
   service-bridge:
-    image: alpine:latest
+    image: alpine:3.19
     container_name: service-bridge
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -126,7 +130,7 @@ services:
 
   # Traefik Service Registration in Consul
   traefik-consul-registration:
-    image: alpine:latest
+    image: alpine:3.19
     container_name: traefik-consul-registration
     volumes:
       - ../scripts:/scripts
@@ -181,7 +185,7 @@ services:
 
   # Service to populate Consul KV store with initial configuration
   consul-config-loader:
-    image: alpine:latest
+    image: alpine:3.19
     container_name: consul-config-loader
     volumes:
       - ../scripts:/scripts
