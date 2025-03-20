@@ -35,4 +35,20 @@ curl -X PUT -d 'true' http://consul-server:8500/v1/kv/features/new_ui
 curl -X PUT -d 'false' http://consul-server:8500/v1/kv/features/beta_feature
 curl -X PUT -d 'true' http://consul-server:8500/v1/kv/features/analytics
 
+# Traefik specific configuration
+# API Gateway settings
+curl -X PUT -d 'true' http://consul-server:8500/v1/kv/config/api-gateway/enabled
+curl -X PUT -d 'api.example.com' http://consul-server:8500/v1/kv/config/api-gateway/domain
+curl -X PUT -d 'true' http://consul-server:8500/v1/kv/config/api-gateway/tls/enabled
+curl -X PUT -d 'true' http://consul-server:8500/v1/kv/config/api-gateway/retry/enabled
+curl -X PUT -d '3' http://consul-server:8500/v1/kv/config/api-gateway/retry/attempts
+curl -X PUT -d '100ms' http://consul-server:8500/v1/kv/config/api-gateway/retry/initialInterval
+
+# Traefik metrics settings
+curl -X PUT -d 'true' http://consul-server:8500/v1/kv/config/api-gateway/metrics/enabled
+curl -X PUT -d 'prometheus' http://consul-server:8500/v1/kv/config/api-gateway/metrics/provider
+
+# Traefik middleware chain defaults
+curl -X PUT -d 'security-headers,rate-limit' http://consul-server:8500/v1/kv/config/api-gateway/default-middlewares
+
 echo "Configuration successfully loaded into Consul KV store"
