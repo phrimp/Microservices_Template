@@ -1,14 +1,12 @@
-version: '3.8'
-
 services:
   # Consul Server - The central service discovery and configuration component
   consul-server:
     image: hashicorp/consul:1.15
     container_name: consul-server
-    command: agent -server -ui -client=0.0.0.0 -config-file=/consul/config/consul-server.json
+    command: agent -server -bootstrap-expect=1 -ui -client=0.0.0.0 -config-file=/consul/config/consul-server.json
     volumes:
       - consul-server-data:/consul/data
-      - ./config/consul-server.json:/consul/config/consul-server.json
+      - ../config/consul-server.json:/consul/config/consul-server.json
     ports:
       - "8500:8500"  # UI and API
       - "8600:8600/tcp"  # DNS
@@ -30,7 +28,7 @@ services:
     command: agent -client=0.0.0.0 -config-file=/consul/config/consul-client.json -retry-join=consul-server
     volumes:
       - consul-client-data:/consul/data
-      - ./config/consul-client.json:/consul/config/consul-client.json
+      - ../config/consul-client.json:/consul/config/consul-client.json
     depends_on:
       consul-server:
         condition: service_healthy
@@ -67,11 +65,11 @@ services:
 
   # Service to populate Consul KV store with initial configuration
   consul-config-loader:
-    image: curlimages/curl:latest
+    image: alpine:latest
     container_name: consul-config-loader
     volumes:
-      - ./scripts/consul-kv-config.sh:/scripts/consul-kv-config.sh
-    entrypoint: ["/bin/sh", "-c", "chmod +x /scripts/consul-kv-config.sh && /scripts/consul-kv-config.sh"]
+      - ../scripts:/scripts
+    entrypoint: ["/bin/sh", "-c", "apk add --no-cache curl && chmod +x /scripts/consul-kv-config.sh && sh /scripts/consul-kv-config.sh"]
     environment:
       - CONSUL_HTTP_ADDR=consul-server:8500
     depends_on:
