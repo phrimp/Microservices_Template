@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/gofiber/fiber/v2"
@@ -14,5 +15,6 @@ func main() {
 			"service": "example-service",
 		})
 	})
-	example_service.Listen(os.Getenv("SERVICE_PORT"))
+	err := example_service.Listen(":" + os.Getenv("SERVICE_PORT"))
+	fmt.Println(err)
 }

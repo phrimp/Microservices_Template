@@ -1,7 +1,7 @@
 ## Traefik v3 Static Configuration
 entryPoints:
   web:
-    address: ":%env:TRAEFIK_HTTP_PORT%"
+    address: ":{{ env \"TRAEFIK_HTTP_PORT\" }}"
     http:
       redirections:
         entryPoint:
@@ -9,12 +9,12 @@ entryPoints:
           scheme: https
           permanent: true
   websecure:
-    address: ":%env:TRAEFIK_HTTPS_PORT%"
+    address: ":{{ env \"TRAEFIK_HTTPS_PORT\" }}"
     http:
       tls:
         certResolver: letsencrypt
   metrics:
-    address: ":%env:TRAEFIK_DASHBOARD_PORT%"
+    address: ":{{ env \"TRAEFIK_DASHBOARD_PORT\" }}"
 
 api:
   dashboard: true
@@ -24,7 +24,7 @@ api:
 providers:
   consulCatalog:
     endpoint:
-      address: "%env:CONSUL_HTTP_ADDR%"
+      address: "{{ env \"CONSUL_HTTP_ADDR\" }}"
       scheme: "http"
     exposedByDefault: false
     connectAware: true

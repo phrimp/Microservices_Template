@@ -35,7 +35,7 @@ services:
     networks:
       - service-mesh
     restart: unless-stopped
-  
+
   # Traefik - API Gateway and Edge Router
   traefik:
     image: traefik:v3.0
@@ -47,24 +47,56 @@ services:
       - "${TRAEFIK_METRIC_PORT}:${TRAEFIK_METRIC_PORT}"  # Metrics
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ../config/traefik/traefik.yaml:/etc/traefik/traefik.yaml:ro
       - ../config/traefik/dynamic:/etc/traefik/dynamic:ro
       - traefik-acme:/etc/traefik/acme
       - traefik-logs:/var/log/traefik
     environment:
       - TZ=${TZ}
-      - TRAEFIK_HTTP_PORT=${TRAEFIK_HTTP_PORT}      # HTTP
-      - TRAEFIK_HTTPS_PORT=${TRAEFIK_HTTPS_PORT}    # HTTPS
-      - TRAEFIK_DASHBOARD_PORT=${TRAEFIK_DASHBOARD_PORT} # Dashboard
-      - TRAEFIK_METRIC_PORT=${TRAEFIK_METRIC_PORT}  # Metrics
-      - CONSUL_HTTP_ADDR=${CONSUL_HTTP_ADDR}
+      # EntryPoints configuration
+      - TRAEFIK_ENTRYPOINTS_WEB_ADDRESS=:${TRAEFIK_HTTP_PORT}
+      - TRAEFIK_ENTRYPOINTS_WEBSECURE_ADDRESS=:${TRAEFIK_HTTPS_PORT}
+      - TRAEFIK_ENTRYPOINTS_METRICS_ADDRESS=:${TRAEFIK_METRIC_PORT}
+      - TRAEFIK_ENTRYPOINTS_WEB_HTTP_REDIRECTIONS_ENTRYPOINT_TO=websecure
+      - TRAEFIK_ENTRYPOINTS_WEB_HTTP_REDIRECTIONS_ENTRYPOINT_SCHEME=https
+      - TRAEFIK_ENTRYPOINTS_WEB_HTTP_REDIRECTIONS_ENTRYPOINT_PERMANENT=true
+      # API and Dashboard configuration
+      - TRAEFIK_API_DASHBOARD=${TRAEFIK_API_DASHBOARD}
+      - TRAEFIK_API_INSECURE=${TRAEFIK_API_INSECURE}
+      # Providers configuration
+      - TRAEFIK_PROVIDERS_CONSULCATALOG_ENDPOINT_ADDRESS=${CONSUL_HTTP_ADDR}
+      - TRAEFIK_PROVIDERS_CONSULCATALOG_ENDPOINT_SCHEME=http
+      - TRAEFIK_PROVIDERS_CONSULCATALOG_EXPOSEDBYDEFAULT=${TRAEFIK_PROVIDERS_CONSULCATALOG_EXPOSEDBYDEFAULT}
+      - TRAEFIK_PROVIDERS_CONSULCATALOG_CONNECTAWARE=${TRAEFIK_PROVIDERS_CONSULCATALOG_CONNECTAWARE}
+      - TRAEFIK_PROVIDERS_CONSULCATALOG_CONNECTBYDEFAULT=false
+      - TRAEFIK_PROVIDERS_CONSULCATALOG_WATCH=${TRAEFIK_PROVIDERS_CONSULCATALOG_WATCH}
+      - TRAEFIK_PROVIDERS_CONSULCATALOG_PREFIX=${TRAEFIK_PROVIDERS_CONSULCATALOG_PREFIX}
+      - TRAEFIK_PROVIDERS_FILE_DIRECTORY=/etc/traefik/dynamic
+      - TRAEFIK_PROVIDERS_FILE_WATCH=true
+      # Let's Encrypt configuration
+      - TRAEFIK_CERTIFICATESRESOLVERS_LETSENCRYPT_ACME_EMAIL=${TRAEFIK_ACME_EMAIL}
+      - TRAEFIK_CERTIFICATESRESOLVERS_LETSENCRYPT_ACME_STORAGE=/etc/traefik/acme/acme.json
+      - TRAEFIK_CERTIFICATESRESOLVERS_LETSENCRYPT_ACME_HTTPCHALLENGE_ENTRYPOINT=web
+      # Metrics configuration
+      - TRAEFIK_METRICS_PROMETHEUS_ENTRYPOINT=metrics
+      # Logging
+      - TRAEFIK_LOG_LEVEL=${TRAEFIK_LOG_LEVEL}
+      - TRAEFIK_LOG_FORMAT=${TRAEFIK_LOG_FORMAT}
+      - TRAEFIK_ACCESSLOG=true
+      - TRAEFIK_ACCESSLOG_FORMAT=json
+      - TRAEFIK_PROVIDERS_CONSULCATALOG_ENDPOINT_ADDRESS=${CONSUL_HTTP_ADDR}
+      - TRAEFIK_PROVIDERS_CONSULCATALOG_ENDPOINT_SCHEME=http
+      - TRAEFIK_PROVIDERS_CONSULCATALOG_EXPOSEDBYDEFAULT=false
+      - TRAEFIK_PROVIDERS_CONSULCATALOG_CONNECTAWARE=true
+      - TRAEFIK_PROVIDERS_CONSULCATALOG_WATCH=true
+      - TRAEFIK_PROVIDERS_CONSULCATALOG_PREFIX=traefik     
+      - TRAEFIK_ACCESSLOG_FILEPATH=/var/log/traefik/access.log
     networks:
       - service-mesh
     depends_on:
       consul-server:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "--spider", "http://localhost:8080/ping"]
+      test: ["CMD", "wget", "--spider", "http://localhost:${TRAEFIK_DASHBOARD_PORT}/ping"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -75,7 +107,23 @@ services:
       - "traefik.http.routers.traefik-dashboard.rule=Host(`traefik.example.com`)"
       - "traefik.http.routers.traefik-dashboard.service=api@internal"
       - "traefik.http.routers.traefik-dashboard.entrypoints=websecure"
-  
+
+  service-bridge:
+    image: alpine:latest
+    container_name: service-bridge
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ../scripts/service-bridge.sh:/scripts/service-bridge.sh
+    entrypoint: ["/bin/sh", "-c", "apk add --no-cache curl jq docker-cli && chmod +x /scripts/service-bridge.sh && sh /scripts/service-bridge.sh"]
+    environment:
+      - CONSUL_HTTP_ADDR=${CONSUL_HTTP_ADDR}
+    depends_on:
+      consul-server:
+        condition: service_healthy
+    networks:
+      - service-mesh
+    restart: unless-stopped 
+
   # Traefik Service Registration in Consul
   traefik-consul-registration:
     image: alpine:latest
@@ -100,36 +148,36 @@ services:
     restart: on-failure
 
   # Example Go Service - A Golang service that integrates with Consul
-    example-service:
-      build:
-        context: ../services/example-service
-        dockerfile: Dockerfile
-      container_name: example-service
-      ports:
-        - "${EXAMPLE_SERVICE_PORT}:${EXAMPLE_SERVICE_PORT}"
-      environment:
-        - SERVICE_NAME=${EXAMPLE_SERVICE_NAME}
-        - SERVICE_ID=${EXAMPLE_SERVICE_ID}
-        - SERVICE_PORT=${EXAMPLE_SERVICE_PORT}
-        - CONSUL_HTTP_ADDR=${CONSUL_HTTP_ADDR}
-      volumes:
-        - ../config/service_definitions/example-service.json:/app/service-definition.json
-      depends_on:
-        consul-server:
-          condition: service_healthy
-      networks:
-        - service-mesh
-      healthcheck:
-        test: ["CMD", "wget", "--spider", "http://localhost:${EXAMPLE_SERVICE_PORT}/health"]
-        interval: 10s
-        timeout: 5s
-        retries: 3
-      restart: unless-stopped
-      labels:
-        - "traefik.enable=true"
-        - "traefik.http.routers.example.rule=Host(`api.example.com`) && PathPrefix(`/example`)"
-        - "traefik.http.routers.example.entrypoints=websecure"
-        - "traefik.http.routers.example.middlewares=security-headers,rate-limit"
+  example-service:
+    build:
+      context: ../services/example-service
+      dockerfile: Dockerfile
+    container_name: example-service
+    ports:
+      - "${EXAMPLE_SERVICE_PORT}:${EXAMPLE_SERVICE_PORT}"
+    environment:
+      - SERVICE_NAME=${EXAMPLE_SERVICE_NAME}
+      - SERVICE_ID=${EXAMPLE_SERVICE_ID}
+      - SERVICE_PORT=${EXAMPLE_SERVICE_PORT}
+      - CONSUL_HTTP_ADDR=${CONSUL_HTTP_ADDR}
+    volumes:
+      - ../config/service_definitions/example-service.json:/app/service-definition.json
+    depends_on:
+      consul-server:
+        condition: service_healthy
+    networks:
+      - service-mesh
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "http://localhost:${EXAMPLE_SERVICE_PORT}/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.example.rule=Host(`api.example.com`) && PathPrefix(`/example`)"
+      - "traefik.http.routers.example.entrypoints=websecure"
+      - "traefik.http.routers.example.middlewares=security-headers,rate-limit"
 
   # Service to populate Consul KV store with initial configuration
   consul-config-loader:

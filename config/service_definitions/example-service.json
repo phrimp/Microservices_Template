@@ -2,15 +2,21 @@
   "ID": "example-service-1",
   "Name": "example-service",
   "Address": "",
-  "Port": 8080,
-  "Check": {
-    "HTTP": "http://localhost:8080/health",
-    "Interval": "10s",
-    "Timeout": "1s"
-  },
-  "Tags": ["go", "api", "v1"],
+  "Port": 8081,
+  "Tags": [
+    "traefik.enable=true",
+    "traefik.http.routers.example.rule=Host(`api.example.com`) && PathPrefix(`/example`)",
+    "traefik.http.routers.example.entrypoints=websecure",
+    "traefik.http.routers.example.middlewares=security-headers,rate-limit",
+    "traefik.http.services.example.loadbalancer.server.port=8081"
+  ],
   "Meta": {
     "version": "1.0.0",
     "environment": "development"
+  },
+  "Check": {
+    "HTTP": "http://localhost:8081/health",
+    "Interval": "10s",
+    "Timeout": "1s"
   }
 }
