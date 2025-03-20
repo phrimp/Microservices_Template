@@ -1,0 +1,90 @@
+version: '3.8'
+
+services:
+  # Consul Server - The central service discovery and configuration component
+  consul-server:
+    image: hashicorp/consul:1.15
+    container_name: consul-server
+    command: agent -server -ui -client=0.0.0.0 -config-file=/consul/config/consul-server.json
+    volumes:
+      - consul-server-data:/consul/data
+      - ./config/consul-server.json:/consul/config/consul-server.json
+    ports:
+      - "8500:8500"  # UI and API
+      - "8600:8600/tcp"  # DNS
+      - "8600:8600/udp"  # DNS
+    networks:
+      - service-mesh
+    healthcheck:
+      test: ["CMD", "consul", "members"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  # Consul Client - Example client that joins the Consul cluster
+  consul-client:
+    image: hashicorp/consul:1.15
+    container_name: consul-client
+    command: agent -client=0.0.0.0 -config-file=/consul/config/consul-client.json -retry-join=consul-server
+    volumes:
+      - consul-client-data:/consul/data
+      - ./config/consul-client.json:/consul/config/consul-client.json
+    depends_on:
+      consul-server:
+        condition: service_healthy
+    networks:
+      - service-mesh
+    restart: unless-stopped
+
+  # Example Go Service - A Golang service that integrates with Consul
+  # example-service:
+  #   build:
+  #     context: ../services/example-service
+  #     dockerfile: Dockerfile
+  #   container_name: example-service
+  #   ports:
+  #     - "8080:8080"
+  #   environment:
+  #     - SERVICE_NAME=example-service
+  #     - SERVICE_ID=example-service-1
+  #     - SERVICE_PORT=8080
+  #     - CONSUL_HTTP_ADDR=consul-server:8500
+  #   volumes:
+  #     - ./config/service_definitions/example-service.json:/app/service-definition.json
+  #   depends_on:
+  #     consul-server:
+  #       condition: service_healthy
+  #   networks:
+  #     - service-mesh
+  #   healthcheck:
+  #     test: ["CMD", "wget", "--spider", "http://localhost:8080/health"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 3
+  #   restart: unless-stopped
+
+  # Service to populate Consul KV store with initial configuration
+  consul-config-loader:
+    image: curlimages/curl:latest
+    container_name: consul-config-loader
+    volumes:
+      - ./scripts/consul-kv-config.sh:/scripts/consul-kv-config.sh
+    entrypoint: ["/bin/sh", "-c", "chmod +x /scripts/consul-kv-config.sh && /scripts/consul-kv-config.sh"]
+    environment:
+      - CONSUL_HTTP_ADDR=consul-server:8500
+    depends_on:
+      consul-server:
+        condition: service_healthy
+    networks:
+      - service-mesh
+    restart: on-failure
+
+volumes:
+  consul-server-data:
+  consul-client-data:
+
+networks:
+  service-mesh:
+    driver: bridge
