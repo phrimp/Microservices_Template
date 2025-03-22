@@ -1,0 +1,11 @@
+{
+  "datacenter": "dc1",
+  "data_dir": "/consul/data",
+  "log_level": "INFO",
+  "server": false,
+  "bind_addr": "0.0.0.0",
+  "client_addr": "0.0.0.0",
+  "retry_join": ["consul-server-1"],
+  "enable_script_checks": true,
+  "enable_local_script_checks": true
+}
