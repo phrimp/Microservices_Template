@@ -1,0 +1,25 @@
+## Static configuration for Traefik v3
+entryPoints:
+  web:
+    address: ":80"
+  websecure:
+    address: ":443"
+
+api:
+  dashboard: true
+
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false
+  
+  consul:
+    endpoints:
+      - "http://consul-server:8500"
+    rootKey: "traefik"
+    # In Traefik v3, use insecureSkipVerify instead of insecure
+    tls:
+      insecureSkipVerify: true
+
+log:
+  level: "INFO"

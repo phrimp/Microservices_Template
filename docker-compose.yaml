@@ -17,6 +17,25 @@ services:
       "
     networks:
       - consul-net
+      
+  # Create Traefik config files from .env on startup
+  traefik-config:
+    image: alpine:latest
+    container_name: traefik-config-init
+    volumes:
+      - ./traefik/scripts:/scripts
+      - ./traefik/config:/config
+      - ./.env:/.env
+    command: >
+      sh -c "
+        apk add --no-cache jq bash dos2unix &&
+        cd /scripts &&
+        dos2unix generate-traefik-config.sh &&
+        chmod +x generate-traefik-config.sh &&
+        bash ./generate-traefik-config.sh
+      "
+    networks:
+      - consul-net
 
   # Consul server
   consul-server:
@@ -44,8 +63,53 @@ services:
     networks:
       - consul-net
 
+  # Traefik API Gateway
+  traefik:
+    image: traefik:latest
+    container_name: traefik
+    restart: unless-stopped
+    depends_on:
+      - consul-server
+      - traefik-config
+      - traefik-consul-register
+    ports:
+      - "${TRAEFIK_HTTP_PORT}:80"
+      - "${TRAEFIK_HTTPS_PORT}:443"
+      - "${TRAEFIK_DASHBOARD_PORT}:8080"
+    volumes:
+      - ./traefik/config:/etc/traefik
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command:
+      - "--configFile=/etc/traefik/traefik.yaml"
+    networks:
+      - consul-net
+      - traefik-net
+      
+  # Register Traefik configuration in Consul
+  traefik-consul-register:
+    image: alpine:latest
+    container_name: traefik-consul-register
+    depends_on:
+      - consul-server
+      - traefik-config
+    volumes:
+      - ./traefik/scripts:/scripts
+      - ./traefik/config:/config
+    command: >
+      sh -c "
+        apk add --no-cache curl jq bash dos2unix &&
+        cd /scripts &&
+        dos2unix register-traefik-config-to-consul.sh &&
+        chmod +x register-traefik-config-to-consul.sh &&
+        bash ./register-traefik-config-to-consul.sh
+      "
+    networks:
+      - consul-net
+
 networks:
   consul-net:
+    driver: bridge
+  traefik-net:
     driver: bridge
 
 volumes:

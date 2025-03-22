@@ -14,5 +14,5 @@
     "http": 8500,
     "dns": 8600
   },
-  "encrypt": "your-base64-encryption-key-here"
+  "encrypt": "aUtRamIwbjhZbWlJYnh1d0tvR1lXZVhiZEZjWFBHcnE="
 }
