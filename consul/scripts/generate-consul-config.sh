@@ -28,7 +28,7 @@ cat >../config/server.json <<EOF
   "bind_addr": "0.0.0.0",
   "client_addr": "0.0.0.0",
   "bootstrap_expect": 1,
-  "node_name": "consul-server-1",
+  "node_name": "consul-server",
   "ports": {
     "http": 8500,
     "dns": 8600

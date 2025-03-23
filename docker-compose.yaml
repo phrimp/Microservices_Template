@@ -39,7 +39,7 @@ services:
 
   # Consul server
   consul-server:
-    image: hashicorp/consul:${CONSUL_VERSION}
+    image: hashicorp/consul:1.15.4
     container_name: consul-server
     restart: unless-stopped
     depends_on:
@@ -54,7 +54,7 @@ services:
     environment:
       - CONSUL_BIND_INTERFACE=eth0
       - CONSUL_AGENT_LEVEL=${CONSUL_LOG_LEVEL}
-    command: "agent -server -ui -node=server-1 -bootstrap-expect=1 -client=0.0.0.0 -config-dir=/consul/config"
+    command: "agent -server -ui -node=consul-server -bootstrap-expect=1 -client=0.0.0.0 -config-dir=/consul/config"
     healthcheck:
       test: ["CMD", "consul", "members"]
       interval: 10s
@@ -65,7 +65,7 @@ services:
 
   # Traefik API Gateway
   traefik:
-    image: traefik:latest
+    image: traefik:3.3
     container_name: traefik
     restart: unless-stopped
     depends_on:
@@ -102,6 +102,62 @@ services:
         dos2unix register-traefik-config-to-consul.sh &&
         chmod +x register-traefik-config-to-consul.sh &&
         bash ./register-traefik-config-to-consul.sh
+      "
+    networks:
+      - consul-net
+
+  vault:
+    image: hashicorp/vault:1.19
+    container_name: vault
+    restart: unless-stopped
+    depends_on:
+      - consul-server
+    ports:
+      - "${VAULT_PORT:-8200}:8200"
+    environment:
+      - VAULT_ADDR=http://0.0.0.0:8200
+    cap_add:
+      - IPC_LOCK
+    volumes:
+      - ./vault/config:/vault/config
+    command: server -config=/vault/config/vault.hcl
+    networks:
+      - consul-net
+
+  # Vault initialization container
+  vault-init:
+    image: hashicorp/vault:1.19
+    container_name: vault-init
+    depends_on:
+      - vault
+    environment:
+      - VAULT_ADDR=http://vault:${VAULT_PORT}
+      # Pass through all environment variables
+      - CONSUL_SERVER=${CONSUL_SERVER:-consul-server}
+      - CONSUL_HTTP_PORT=${CONSUL_HTTP_PORT:-8500}
+      - VAULT_CONSUL_PATH=${VAULT_CONSUL_PATH:-vault/}
+      - VAULT_PORT=${VAULT_PORT:-8200}
+      - VAULT_TLS_DISABLE=${VAULT_TLS_DISABLE:-1}
+      - VAULT_UI_ENABLED=${VAULT_UI_ENABLED:-true}
+      - VAULT_DISABLE_MLOCK=${VAULT_DISABLE_MLOCK:-true}
+      - VAULT_API_ADDR=${VAULT_API_ADDR:-0.0.0.0}
+      # Secrets to store in Vault
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - DB_PASSWORD=${DB_PASSWORD}
+      # Other configs
+      - VAULT_DEV_ROOT_TOKEN_ID=${VAULT_DEV_ROOT_TOKEN_ID:-root}
+    volumes:
+      - ./vault/scripts:/scripts
+      - ./vault/config:/vault/config
+      - ./.env:/.env
+    command: >
+      sh -c "
+        apk add --no-cache jq bash dos2unix &&
+        cd /scripts &&
+        dos2unix init-vault.sh &&
+        chmod +x init-vault.sh &&
+        bash ./init-vault.sh
       "
     networks:
       - consul-net
