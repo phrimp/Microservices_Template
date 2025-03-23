@@ -18,8 +18,3 @@ http:
       compress:
         excludedContentTypes:
           - "text/event-stream"
-    
-    basic-auth:
-      basicAuth:
-        users:
-          - "admin:adminpassword"

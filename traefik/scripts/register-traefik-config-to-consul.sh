@@ -26,45 +26,43 @@ if grep -q "rate-limit:" ../config/dynamic.yaml; then
   BURST=$(grep -A3 "rateLimit:" ../config/dynamic.yaml | grep "burst:" | awk '{print $2}')
 
   curl -X PUT -d '{
-    "rate": {
+    "rateLimit": {
       "average": '$AVERAGE',
       "burst": '$BURST'
     }
-  }' http://consul-server:8500/v1/kv/traefik/http/middlewares/rate-limit/rateLimit
+  }' http://consul-server:8500/v1/kv/traefik/http/middlewares/rate-limit/
+
+  echo "Rate limit middleware registered successfully"
 fi
 
 # Secure headers middleware
 if grep -q "secure-headers:" ../config/dynamic.yaml; then
   echo "Registering secure-headers middleware..."
   curl -X PUT -d '{
-    "frameDeny": true,
-    "browserXssFilter": true,
-    "contentTypeNosniff": true,
-    "stsSeconds": 31536000,
-    "stsIncludeSubdomains": true
-  }' http://consul-server:8500/v1/kv/traefik/http/middlewares/secure-headers/headers
+    "headers": {
+      "frameDeny": true,
+      "browserXssFilter": true,
+      "contentTypeNosniff": true,
+      "stsSeconds": 31536000,
+      "stsIncludeSubdomains": true
+    }
+  }' http://consul-server:8500/v1/kv/traefik/http/middlewares/secure-headers/
+
+  echo "Secure headers middleware registered successfully"
 fi
 
 # Compression middleware
 if grep -q "compress:" ../config/dynamic.yaml; then
   echo "Registering compress middleware..."
   curl -X PUT -d '{
-    "excludedContentTypes": [
-      "text/event-stream"
-    ]
-  }' http://consul-server:8500/v1/kv/traefik/http/middlewares/compress/compress
-fi
+    "compress": {
+      "excludedContentTypes": [
+        "text/event-stream"
+      ]
+    }
+  }' http://consul-server:8500/v1/kv/traefik/http/middlewares/compress/
 
-# Basic authentication middleware
-if grep -q "basic-auth:" ../config/dynamic.yaml; then
-  echo "Registering basic-auth middleware..."
-  USER_LINE=$(grep -A3 "basicAuth:" ../config/dynamic.yaml | grep "-" | sed 's/^[ \t]*-[ \t]*//')
-
-  curl -X PUT -d '{
-    "users": [
-      "'$USER_LINE'"
-    ]
-  }' http://consul-server:8500/v1/kv/traefik/http/middlewares/basic-auth/basicAuth
+  echo "Compression middleware registered successfully"
 fi
 
 # IP whitelist middleware
@@ -84,8 +82,16 @@ if grep -q "ipwhitelist:" ../config/dynamic.yaml; then
   JSON_IPS+="]"
 
   curl -X PUT -d '{
-    "sourceRange": '$JSON_IPS'
-  }' http://consul-server:8500/v1/kv/traefik/http/middlewares/ipwhitelist/ipWhiteList
+    "ipWhiteList": {
+      "sourceRange": '$JSON_IPS'
+    }
+  }' http://consul-server:8500/v1/kv/traefik/http/middlewares/ipwhitelist/
+
+  echo "IP whitelist middleware registered successfully"
 fi
+
+# Remove the basic-auth middleware if it exists in Consul
+echo "Removing basic-auth middleware if it exists..."
+curl -X DELETE http://consul-server:8500/v1/kv/traefik/http/middlewares/basic-auth/
 
 echo "Traefik configuration has been successfully registered in Consul."

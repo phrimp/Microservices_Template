@@ -17,9 +17,6 @@ providers:
     endpoints:
       - "http://consul-server:8500"
     rootKey: "traefik"
-    # In Traefik v3, use insecureSkipVerify instead of insecure
-    tls:
-      insecureSkipVerify: true
 
 log:
   level: "INFO"
