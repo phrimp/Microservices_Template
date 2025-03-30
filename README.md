@@ -1,5 +1,3 @@
-# Microservice Template Instructions
-
 ## Overview
 
 This document provides step-by-step instructions for setting up and using the microservice architecture template. The template implements a robust, scalable microservice-based application infrastructure using modern technologies for containerization, service discovery, API gateway, monitoring, and more.
@@ -186,7 +184,195 @@ docker-compose ps
 - **Traefik Dashboard**: http://localhost:8080
 - **Vault Dashboard**: http://localhost:8200
 
-### 4. Adding Your First Microservice
+### 4. Adding a Service to the Root Docker Compose with a Dockerfile
+
+You can add your service directly to the root `docker-compose.yaml` file using a custom Dockerfile. This approach gives you full control over your service environment and is useful for:
+
+- Development environments where you need to build from source
+- Custom services that aren't available as pre-built images
+- Services that require specific dependencies or configurations
+- Projects where you want to keep everything in version control
+
+Here's how to add a service with a Dockerfile to the root Docker Compose file:
+
+1. Ensure you have a Dockerfile for your service at `./services/app-service/Dockerfile`:
+
+   If you don't already have a Dockerfile, you can create one:
+
+   ```bash
+   mkdir -p ./services/app-service
+   ```
+
+   A simple Dockerfile might look like:
+
+   ```Dockerfile
+   # Choose a base image appropriate for your application
+   FROM node:18-alpine
+   
+   # Set working directory
+   WORKDIR /app
+   
+   # Copy dependency definitions
+   COPY package*.json ./
+   
+   # Install dependencies
+   RUN npm install
+   
+   # Copy application code
+   COPY . .
+   
+   # Expose the port your application uses
+   EXPOSE 8080
+   
+   # Define healthcheck
+   HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+     CMD wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1
+   
+   # Command to run the application
+   CMD ["npm", "start"]
+   ```
+
+2. Edit the `docker-compose.yaml` file and add your service configuration with a build directive:
+
+```yaml
+services:
+  # Existing services (consul-server, traefik, etc.)
+  
+  # Add your new service with a Dockerfile
+  app-service:
+    build:
+      context: ./services/app-service  # Path to your service directory containing the Dockerfile
+      dockerfile: Dockerfile           # Name of the Dockerfile (if it's just "Dockerfile" this line is optional)
+    container_name: app-service
+    restart: unless-stopped
+    environment:
+      - SERVICE_NAME=app-service
+      - NODE_ENV=development
+      - DATABASE_URL=postgres://user:password@db:5432/mydatabase
+      # Add other environment variables as needed
+    ports:
+      - "8081:8080"  # Map container port to host port if direct access is needed
+    volumes:
+      - ./services/app-service:/app  # Mount source code for development (optional)
+      - /app/node_modules            # Prevent overwriting node_modules with local version
+      - app-service-data:/app/data   # Persistent data volume
+    networks:
+      - traefik-net
+      - consul-net
+    depends_on:
+      - consul-server
+      - vault
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.app-service.rule=PathPrefix(`/app`)"
+      - "traefik.http.services.app-service.loadbalancer.server.port=8080"
+      - "traefik.http.middlewares.app-strip-prefix.stripprefix.prefixes=/app"
+      - "traefik.http.routers.app-service.middlewares=app-strip-prefix,rate-limit@consul,secure-headers@consul"
+      - "traefik.docker.network=microservices_template_traefik-net"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+# Add any new volumes your service needs
+volumes:
+  # Existing volumes (consul-data, vault-file, etc.)
+  app-service-data:
+```
+
+3. Build and start your service:
+
+```bash
+# Build and start your service
+docker-compose up -d --build app-service
+
+# If you want to see the build logs
+docker-compose up --build app-service
+
+# If starting all services from scratch
+docker-compose up -d --build
+```
+
+4. Verify that your service is registered with Consul by checking the Consul dashboard or using the CLI:
+
+```bash
+# Using curl
+curl http://localhost:8500/v1/catalog/service/app-service
+
+# Or check the Consul UI at http://localhost:8500
+```
+
+5. Test that Traefik is properly routing to your service:
+
+```bash
+curl http://localhost/app/
+```
+
+6. For development, you can easily rebuild after code changes:
+
+```bash
+# Rebuild and restart the service with latest code changes
+docker-compose up -d --build app-service
+```
+
+### 5. Service Lifecycle Management
+
+When your service is part of the root Docker Compose file, its lifecycle is managed together with the core infrastructure:
+
+- **Starting all services**: `docker-compose up -d`
+- **Stopping all services**: `docker-compose down`
+- **View logs for a specific service**: `docker-compose logs api-service`
+- **Restart a specific service**: `docker-compose restart api-service`
+- **Scale a service**: `docker-compose up -d --scale api-service=3` (requires proper configuration for scaling)
+
+### 6. Health Checks and Status Monitoring
+
+With the service defined in the root Docker Compose file, you can monitor its health status:
+
+- Through Docker: `docker-compose ps` will show the health status
+- Through Consul UI: Check the health status in the Services tab
+- Through Consul API: `curl http://localhost:8500/v1/health/service/api-service?passing`
+
+### 7. Service Configuration Management
+
+For service-specific configurations:
+
+1. Create a config directory for your service:
+
+```bash
+mkdir -p ./api-service/config
+```
+
+2. Add configuration files that will be mounted to the container:
+
+```bash
+# Example config file
+cat > ./api-service/config/app-config.json << EOF
+{
+  "logLevel": "info",
+  "timeout": 30,
+  "features": {
+    "caching": true,
+    "metrics": true
+  }
+}
+EOF
+```
+
+3. Update your service definition to mount this configuration:
+
+```yaml
+api-service:
+  # ... other settings
+  volumes:
+    - ./api-service/config:/app/config
+```
+
+### 4. Adding a Microservice Using a Separate Docker Compose File
+
+This was covered in the original documentation and remains a valid approach for more complex scenarios or when you want to keep services isolated.
 
 Create a service directory:
 
@@ -222,11 +408,6 @@ Start your service:
 ```bash
 docker-compose up -d
 ```
-
-Your service will now be:
-- Registered with Consul for service discovery
-- Available through Traefik at the configured path
-- Protected by the configured middlewares
 
 ## Advanced Consul Capabilities
 
@@ -855,7 +1036,264 @@ vault operator raft snapshot save /vault/file/vault-backup.snap
 docker cp vault:/vault/file/vault-backup.snap ./vault-backup.snap
 ```
 
-## Vault vs Environment Variables in This Architecture
+## Creating a Service with a Dockerfile
+
+Instead of using an existing image, you can build your own service image directly within the root docker-compose.yaml file. This approach is useful when you need custom functionality or when you're developing a new service.
+
+### 1. Create Your Service Directory
+
+First, create a directory for your service files:
+
+```bash
+mkdir -p services/my-custom-service
+cd services/my-custom-service
+```
+
+### 2. Create a Dockerfile
+
+Create a Dockerfile that defines your service:
+
+```Dockerfile
+FROM node:18-alpine
+
+# Create app directory
+WORKDIR /usr/src/app
+
+# Install app dependencies
+COPY package*.json ./
+RUN npm install
+
+# Bundle app source
+COPY . .
+
+# Expose the port the app runs on
+EXPOSE 3000
+
+# Create a health check endpoint
+RUN echo 'app.get("/health", (req, res) => res.status(200).send("OK"));' >> src/server.js
+
+# Command to run the application
+CMD ["node", "src/server.js"]
+```
+
+### 3. Create Your Application Files
+
+Add your application code to the service directory. For a simple Node.js service:
+
+```bash
+# Create a basic package.json
+cat > package.json << EOF
+{
+  "name": "my-custom-service",
+  "version": "1.0.0",
+  "description": "A custom microservice",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "consul": "^1.2.0"
+  }
+}
+EOF
+
+# Create source directory
+mkdir -p src
+
+# Create a simple Express server
+cat > src/server.js << EOF
+const express = require('express');
+const Consul = require('consul');
+
+const app = express();
+const port = process.env.PORT || 3000;
+
+// Initialize Consul client
+const consul = new Consul({
+  host: process.env.CONSUL_HOST || 'consul-server',
+  port: process.env.CONSUL_PORT || 8500
+});
+
+// Register service with Consul
+function registerService() {
+  const serviceId = \`my-custom-service-\${process.env.HOSTNAME}\`;
+  const serviceDefinition = {
+    name: 'my-custom-service',
+    id: serviceId,
+    address: process.env.SERVICE_HOST || process.env.HOSTNAME,
+    port: parseInt(port),
+    tags: ['node', 'custom'],
+    check: {
+      http: \`http://\${process.env.HOSTNAME}:\${port}/health\`,
+      interval: '10s',
+      timeout: '5s'
+    }
+  };
+
+  consul.agent.service.register(serviceDefinition, (err) => {
+    if (err) {
+      console.error('Error registering service:', err);
+      return;
+    }
+    console.log('Service registered successfully with ID:', serviceId);
+  });
+
+  // Deregister on shutdown
+  process.on('SIGINT', () => {
+    consul.agent.service.deregister(serviceId, () => {
+      console.log('Service deregistered');
+      process.exit();
+    });
+  });
+}
+
+// Define routes
+app.get('/', (req, res) => {
+  res.send('Hello from my custom service!');
+});
+
+app.get('/health', (req, res) => {
+  res.status(200).send('OK');
+});
+
+// Start the server
+app.listen(port, () => {
+  console.log(\`Service listening at http://localhost:\${port}\`);
+  registerService();
+});
+EOF
+```
+
+### 4. Add the Service to docker-compose.yaml
+
+Now, update your root docker-compose.yaml file to include the custom service:
+
+```yaml
+services:
+  # Existing services (consul-server, traefik, etc.)
+  
+  # Add your custom service
+  my-custom-service:
+    build:
+      context: ./services/my-custom-service
+      dockerfile: Dockerfile
+    container_name: my-custom-service
+    restart: unless-stopped
+    environment:
+      - PORT=3000
+      - CONSUL_HOST=consul-server
+      - SERVICE_NAME=my-custom-service
+    networks:
+      - consul-net
+      - traefik-net
+    depends_on:
+      - consul-server
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.my-custom-service.rule=PathPrefix(`/custom`)"
+      - "traefik.http.services.my-custom-service.loadbalancer.server.port=3000"
+      - "traefik.http.middlewares.custom-strip-prefix.stripprefix.prefixes=/custom"
+      - "traefik.http.routers.my-custom-service.middlewares=custom-strip-prefix,rate-limit@consul,secure-headers@consul"
+      - "traefik.docker.network=microservices_template_traefik-net"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+```
+
+### 5. Build and Start the Service
+
+Build and start your custom service:
+
+```bash
+# Build and start only your custom service
+docker-compose up -d --build my-custom-service
+
+# Or build and start all services
+docker-compose up -d --build
+```
+
+### 6. Verify Service Registration
+
+Verify that your service is properly registered:
+
+```bash
+# Check Consul for service registration
+curl http://localhost:8500/v1/catalog/service/my-custom-service
+
+# Test the service through Traefik
+curl http://localhost/custom/
+```
+
+### 7. Service Logs and Troubleshooting
+
+Monitor your service logs for troubleshooting:
+
+```bash
+# View logs
+docker-compose logs -f my-custom-service
+
+# Check container status
+docker-compose ps my-custom-service
+```
+
+### 8. Additional Dockerfile Examples
+
+#### Python Service
+
+```Dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+EXPOSE 5000
+
+CMD ["python", "app.py"]
+```
+
+#### Java Spring Boot Service
+
+```Dockerfile
+FROM maven:3.8.6-openjdk-17 AS build
+WORKDIR /app
+COPY pom.xml .
+COPY src ./src
+RUN mvn clean package -DskipTests
+
+FROM openjdk:17-slim
+WORKDIR /app
+COPY --from=build /app/target/*.jar app.jar
+EXPOSE 8080
+ENTRYPOINT ["java", "-jar", "app.jar"]
+```
+
+#### Go Service
+
+```Dockerfile
+FROM golang:1.21-alpine AS build
+
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -o service ./cmd/server
+
+FROM alpine:3.18
+WORKDIR /app
+COPY --from=build /app/service .
+EXPOSE 8080
+CMD ["./service"]
+```
+
+## Vault vs Environment Variables
 
 ### Role Separation
 
@@ -1021,3 +1459,8 @@ Before deploying to production:
 - [Traefik Documentation](https://doc.traefik.io/traefik/)
 - [Consul Documentation](https://www.consul.io/docs)
 - [Vault Documentation](https://www.vaultproject.io/docs)
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.# Microservice Template Instructions
+
