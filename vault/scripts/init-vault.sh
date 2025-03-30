@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Script to initialize Vault, unseal it, and store some example secrets
+# Script to initialize Vault, unseal it, and load secrets from files
 # Usage: ./init-vault.sh
 
 # Enable debugging
@@ -11,6 +11,7 @@ set -e # Exit on error
 echo "Checking file system permissions:"
 ls -la /vault/
 ls -la /vault/file/ || echo "Directory doesn't exist yet"
+ls -la /vault/secrets/ || echo "Secrets directory doesn't exist yet"
 
 echo "Waiting for Vault to be ready..."
 until curl -s http://vault:8200/v1/sys/health | grep -q "initialized"; do
@@ -42,20 +43,15 @@ if [ "$INIT_STATUS" = "false" ]; then
 
   # Create directories if they don't exist
   mkdir -p /vault/file || echo "Directory /vault/file already exists"
-  # Windows won't respect chmod the same way, so we'll just make sure directories exist
   mkdir -p /vault/keys || echo "Directory /vault/keys already exists"
 
-  # Save keys to files (in production, you would distribute these securely)
+  # Save keys to files
   echo "Saving keys to multiple locations for redundancy"
-
-  # First try to save to the host-mounted directory
-  # Windows file access is different, so we'll try multiple approaches
-  echo "Attempting to save keys to host-mounted directory..."
 
   # Try with jq
   echo $INIT_RESPONSE | jq . >/vault/keys/keys.json || echo "Warning: jq output to file may have failed"
 
-  # Save in plain text format as well (more reliable for Windows)
+  # Save in plain text format as well
   echo "Unseal Key: $UNSEAL_KEY" >/vault/keys/unseal-key.txt
   echo "Root Token: $VAULT_TOKEN" >/vault/keys/root-token.txt
 
@@ -104,11 +100,13 @@ else
   if [ "$SEAL_STATUS" = "true" ]; then
     echo "Vault is sealed. Retrieving unseal key..."
 
-    # In production, you would obtain the key from a secure location
     # Try multiple locations for the keys
     if [ -f "/vault/file/keys.json" ]; then
       UNSEAL_KEY=$(cat /vault/file/keys.json | jq -r .keys[0])
       echo "Retrieved unseal key from /vault/file/keys.json"
+    elif [ -f "/vault/keys/unseal-key.txt" ]; then
+      UNSEAL_KEY=$(cat /vault/keys/unseal-key.txt | awk '{print $3}')
+      echo "Retrieved unseal key from /vault/keys/unseal-key.txt"
     elif [ -f "/tmp/vault/keys.json" ]; then
       UNSEAL_KEY=$(cat /tmp/vault/keys.json | jq -r .keys[0])
       echo "Retrieved unseal key from /tmp/vault/keys.json"
@@ -132,6 +130,9 @@ else
   if [ -f "/vault/file/keys.json" ]; then
     VAULT_TOKEN=$(cat /vault/file/keys.json | jq -r .root_token)
     echo "Retrieved root token from /vault/file/keys.json"
+  elif [ -f "/vault/keys/root-token.txt" ]; then
+    VAULT_TOKEN=$(cat /vault/keys/root-token.txt | awk '{print $3}')
+    echo "Retrieved root token from /vault/keys/root-token.txt"
   elif [ -f "/tmp/vault/keys.json" ]; then
     VAULT_TOKEN=$(cat /tmp/vault/keys.json | jq -r .root_token)
     echo "Retrieved root token from /tmp/vault/keys.json"
@@ -156,15 +157,16 @@ echo "Vault is unsealed and active."
 echo "Enabling KV secrets engine..."
 vault secrets enable -version=2 kv || echo "KV engine might already be enabled"
 
-# Create a simple key-value secret
-echo "Creating example secrets..."
-vault kv put kv/database/config username="db_user" password="$DB_PASSWORD"
-vault kv put kv/google/api key="$GOOGLE_API_KEY" client_secret="$GOOGLE_CLIENT_SECRET"
+# Load secrets from JSON files in /vault/secrets directory
+echo "Loading secrets from files..."
+
+# Execute the secrets loader script - JSON format only
+/scripts/vault-secrets-loader.sh --path /vault/secrets --mount kv --prefix services/ --recursive
 
 # Create a policy for accessing database secrets
 echo "Creating policies..."
 vault policy write db-readonly - <<EOF
-path "kv/data/database/*" {
+path "kv/data/services/*" {
   capabilities = ["read", "list"]
 }
 EOF
@@ -180,4 +182,4 @@ vault write auth/approle/role/api-service \
   token_ttl=1h \
   token_policies=db-readonly
 
-echo "Vault has been successfully initialized with example configuration."
+echo "Vault has been successfully initialized with all secrets loaded from files."

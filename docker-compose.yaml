@@ -117,20 +117,20 @@ services:
       - ./vault/scripts:/scripts
       - ./.env:/.env
       - vault-file:/vault/file
-      - ./vault/keys:/vault/keys  # Windows host mount for keys
+      - ./vault/keys:/vault/keys
+      - ./vault/secrets:/vault/secrets  # Mount the secrets directory
     environment:
       - VAULT_ADDR=http://vault:8200
       - VAULT_DEV_ROOT_TOKEN_ID=${VAULT_DEV_ROOT_TOKEN_ID:-root}
-      - DB_PASSWORD=${DB_PASSWORD:-default-password}
-      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-default-key}
-      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-default-secret}
     entrypoint: >
       sh -c "
         apk add --no-cache curl jq bash dos2unix &&
         mkdir -p /vault/file /vault/keys &&
         cd /scripts &&
         dos2unix init-vault.sh &&
+        dos2unix vault-secrets-loader.sh &&
         chmod +x init-vault.sh &&
+        chmod +x vault-secrets-loader.sh &&
         bash ./init-vault.sh
       "
     networks:
