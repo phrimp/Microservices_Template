@@ -20,8 +20,8 @@ listener "tcp" {
 
 ui = true
 disable_mlock = true
-api_addr = "http://vault:8200"  # Use container name instead of 0.0.0.0
-cluster_addr = "http://vault:8201"  # Add cluster address
+api_addr = "http://vault:8200"
+cluster_addr = "http://vault:8201"
 
 # Telemetry configuration for monitoring
 telemetry {
