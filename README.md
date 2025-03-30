@@ -1,6 +1,22 @@
-- [Getting Started](../../wiki/Microservices-Template)
+# Quick Start
 
-## Quick Start
+## Prerequisites
+
+- Docker and Docker Compose installed
+- Git installed
+- Basic understanding of containerization and microservices
+- Free ports as specified in the `.env` file (by default: 80, 443, 8080, 8500, 8600, 8200)
+
+## Documentation
+
+This microservices template provides a robust foundation for building scalable applications. The documentation is split between this README and the [project Wiki](../../wiki).
+
+### Quick Links
+
+| Topic | Description |
+|-------|-------------|
+| [Architecture](../../wiki/Architecture) | Detailed overview of the microservice architecture |
+| [Core Component](../../wiki/Core-Components) | Detailed overview of the microservice component |
 
 1. Clone the repository
 2. Configure environment variables
