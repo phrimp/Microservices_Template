@@ -45,6 +45,7 @@ services:
       - TRAEFIK_PROVIDERS_DOCKER=true
       - TRAEFIK_PROVIDERS_DOCKER_ENDPOINT=unix:///var/run/docker.sock
       - TRAEFIK_PROVIDERS_DOCKER_EXPOSEDBYDEFAULT=false
+      - TRAEFIK_PROVIDERS_DOCKER_NETWORK=microservices_template_traefik-net
       - TRAEFIK_PROVIDERS_CONSUL=true
       - TRAEFIK_PROVIDERS_CONSUL_ENDPOINTS=http://consul-server:8500
       - TRAEFIK_PROVIDERS_CONSUL_ROOTKEY=${TRAEFIK_CONSUL_ROOTKEY:-traefik}
@@ -101,6 +102,7 @@ services:
     command: "server"
     networks:
       - consul-net
+      - traefik-net
     depends_on:
       consul-server:
         condition: service_healthy
@@ -113,13 +115,13 @@ services:
   vault-init:
     image: hashicorp/vault:1.19
     container_name: vault-init
-    user: root  # Run as root to ensure we have write permissions
+    user: root
     volumes:
       - ./vault/scripts:/scripts
       - ./.env:/.env
       - vault-file:/vault/file
       - ./vault/keys:/vault/keys
-      - ./vault/secrets:/vault/secrets  # Mount the secrets directory
+      - ./vault/secrets:/vault/secrets
     environment:
       - VAULT_ADDR=http://vault:8200
       - VAULT_DEV_ROOT_TOKEN_ID=${VAULT_DEV_ROOT_TOKEN_ID:-root}
@@ -136,15 +138,17 @@ services:
       "
     networks:
       - consul-net
+    depends_on:
+      - vault
 
 networks:
   consul-net:
     driver: bridge
   traefik-net:
     driver: bridge
+    name: microservices_template_traefik-net
 
 volumes:
   consul-data:
   vault-file:
   vault-logs:
-  traefik-net:

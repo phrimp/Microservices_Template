@@ -198,8 +198,6 @@ cd services/my-service
 Create a Docker Compose file (`docker-compose.yml`):
 
 ```yaml
-version: '3'
-
 services:
   my-service:
     image: your-image:tag
