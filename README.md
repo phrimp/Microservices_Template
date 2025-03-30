@@ -4,6 +4,64 @@
 
 This document provides step-by-step instructions for setting up and using the microservice architecture template. The template implements a robust, scalable microservice-based application infrastructure using modern technologies for containerization, service discovery, API gateway, monitoring, and more.
 
+## Core Components
+
+### Consul: Service Discovery and Distributed Configuration
+
+Consul serves as the backbone of our microservice architecture, providing:
+
+- **Service Discovery**: Enables microservices to find and communicate with each other without hardcoded addresses
+- **Health Checking**: Continuously monitors service health to ensure availability and facilitate failover
+- **Key-Value Store**: Centralized configuration storage that all services can access
+- **Dynamic Configuration**: Allows real-time updates to service configurations without restarts
+- **DNS-based Service Discovery**: Services can be discovered via simple DNS queries
+- **Service Mesh Capabilities**: Provides a foundation for advanced service-to-service communication patterns
+
+In this implementation, Consul:
+- Maintains the service registry for all microservices
+- Stores Traefik's dynamic configurations including middleware definitions
+- Provides health status information for all registered services
+- Enables dynamic reconfiguration of the entire system
+- Acts as the source of truth for service locations and configurations
+
+### Traefik: Modern API Gateway and Edge Router
+
+Traefik functions as the entry point and traffic manager for the system:
+
+- **Automatic Service Discovery**: Integrates with Consul to dynamically discover backend services
+- **Middleware Pipeline**: Processes requests through configurable middleware chains
+- **Dynamic Configuration**: Updates routing rules on-the-fly without restarts
+- **Let's Encrypt Integration**: Automatic SSL certificate provisioning and renewal
+- **Circuit Breaking**: Prevents cascading failures across services
+- **Request Routing**: Directs traffic to appropriate services based on paths, headers, and other criteria
+
+In this implementation, Traefik:
+- Routes external client requests to appropriate internal microservices
+- Applies middleware for security, rate limiting, and request modification
+- Handles SSL termination for secure communication
+- Provides load balancing across service instances
+- Exposes a dashboard for monitoring and troubleshooting
+- Fetches configuration dynamically from Consul
+
+### HashiCorp Vault: Secret Management and Security
+
+Vault provides enterprise-grade security features for the microservice ecosystem:
+
+- **Secure Secret Storage**: Centralized repository for all sensitive information
+- **Dynamic Secrets**: Generate temporary credentials with automatic expiration
+- **Encryption as a Service**: Provide encryption capabilities without exposing keys
+- **Identity-based Access**: Fine-grained control over who can access which secrets
+- **Credential Rotation**: Automatic rotation of credentials to enhance security
+- **Audit Logging**: Comprehensive logs of all secret access attempts
+
+In this implementation, Vault:
+- Securely stores API keys, database credentials, and other sensitive information
+- Provides dynamic access credentials to services based on their identity
+- Implements the AppRole auth method for service-to-service authentication
+- Maintains policies that control which services can access which secrets
+- Uses Consul as its storage backend for high availability
+- Automates the loading of secrets from configuration files
+
 ## Architecture Flow
 
 ### Request Flow
@@ -47,12 +105,23 @@ Services do not communicate through Consul itself; they use Consul only to disco
    - Microservices reference these middlewares using labels or tags.
    - The actual middleware logic executes within Traefik, not as separate services.
 
+### Secret Management Flow
+
+1. **Vault Initialization**: On first startup, Vault is initialized and unsealed with encryption keys securely stored.
+2. **Secret Loading**: Predefined secrets are loaded into Vault's key-value store.
+3. **Service Authentication**: Microservices authenticate to Vault using the AppRole method.
+4. **Secret Access**: 
+   - Services request specific secrets they need from Vault.
+   - Vault checks policies to ensure the service has appropriate access rights.
+   - If approved, Vault provides the requested secrets to the service.
+5. **Secret Rotation**: Credentials can be automatically rotated without service disruption.
+
 ## Prerequisites
 
 - Docker and Docker Compose installed
 - Git installed
 - Basic understanding of containerization and microservices
-- Free ports as specified in the `.env` file (by default: 80, 443, 8080, 8500, 8600)
+- Free ports as specified in the `.env` file (by default: 80, 443, 8080, 8500, 8600, 8200)
 
 ## Quick Start
 
@@ -81,16 +150,18 @@ Important variables to consider:
 - `TRAEFIK_HTTP_PORT`: HTTP port (default: 80)
 - `TRAEFIK_HTTPS_PORT`: HTTPS port (default: 443)
 - `TRAEFIK_DASHBOARD_PORT`: Traefik dashboard port (default: 8080)
+- `VAULT_PORT`: Vault UI and API port (default: 8200)
 
 For production environments:
 - Generate a proper Consul encryption key
 - Set proper passwords and API keys
 - Enable TLS
 - Disable insecure dashboard access
+- Set Vault to non-dev mode
 
 ### 2. Starting the Core Infrastructure
 
-Start the core services (Consul and Traefik):
+Start the core services (Consul, Traefik, and Vault):
 
 ```bash
 docker-compose up -d
@@ -100,6 +171,8 @@ This command starts:
 - Consul server for service discovery and configuration
 - Traefik as the API gateway and load balancer
 - A helper container to register Traefik middleware configurations in Consul
+- Vault for secret management
+- Vault-init container to initialize and configure Vault
 
 Verify the services are running:
 
@@ -111,6 +184,7 @@ docker-compose ps
 
 - **Consul Dashboard**: http://localhost:8500
 - **Traefik Dashboard**: http://localhost:8080
+- **Vault Dashboard**: http://localhost:8200
 
 ### 4. Adding Your First Microservice
 
@@ -155,6 +229,200 @@ Your service will now be:
 - Registered with Consul for service discovery
 - Available through Traefik at the configured path
 - Protected by the configured middlewares
+
+## Advanced Consul Capabilities
+
+### Distributed Configuration
+
+Consul can centralize your application configuration:
+
+```bash
+# Store a configuration value
+curl -X PUT -d 'production' http://localhost:8500/v1/kv/environments/current
+
+# Retrieve it from a service
+consul_client.KV.get('environments/current', function(err, data) {
+  const environment = data.Value;
+  // Use the configuration value
+});
+```
+
+### Service Dependency Management
+
+Define relationships between services in Consul:
+
+```bash
+# Register service with dependencies
+consul_client.agent.service.register({
+  name: 'payment-service',
+  dependencies: ['database-service', 'auth-service']
+});
+```
+
+### Cross-DC Federation
+
+For multi-region deployments, Consul supports federation:
+
+```bash
+# In docker-compose.yml for a second datacenter
+consul-server-dc2:
+  environment:
+    - CONSUL_LOCAL_CONFIG={"datacenter":"dc2","retry_join_wan":["consul-server-dc1"]}
+```
+
+## Advanced Traefik Features
+
+### Advanced Middleware Chains
+
+Create complex request processing pipelines:
+
+```yaml
+# In Consul KV or via Docker labels
+traefik.http.middlewares.auth-chain.chain.middlewares=rate-limit,secure-headers,basic-auth
+traefik.http.routers.my-service.middlewares=auth-chain@consul
+```
+
+### Traffic Mirroring
+
+Test new service versions without affecting users:
+
+```yaml
+# Mirror traffic to a canary service
+traefik.http.middlewares.mirror-to-canary.mirror.service=my-service-canary
+traefik.http.middlewares.mirror-to-canary.mirror.maxBodySize=5M
+```
+
+### Circuit Breaking
+
+Prevent cascading failures with circuit breakers:
+
+```yaml
+# Define circuit breaker in Consul
+curl -X PUT -d '{
+  "circuitBreaker": {
+    "expression": "NetworkErrorRatio() > 0.5"
+  }
+}' http://consul-server:8500/v1/kv/traefik/http/middlewares/my-circuit-breaker/
+```
+
+## Secret Loading
+
+### Example Secret File
+
+Create a JSON file in the `/vault/secrets` directory (mapped to `./vault/secrets` in the host) with your secrets:
+
+**database-secrets.json:**
+```json
+{
+  "username": "app_user",
+  "password": "strongP@ssw0rd123!",
+  "host": "db.example.com",
+  "port": 5432,
+  "database": "production_db",
+  "ssl": true,
+  "max_connections": 20,
+  "connection_timeout": 30,
+  "encryption_key": "ahF8jUxVs9WrPzX6bQnT7EcRdL2mY5Kg",
+  "read_replica": {
+    "host": "db-replica.example.com",
+    "port": 5432,
+    "max_connections": 10
+  },
+  "api_credentials": {
+    "key": "api-key-7f8s9d7f98sd7f98sdf",
+    "secret": "api-secret-8s9df87s9d8f7s9d8f7"
+  }
+}
+```
+
+### Directory Structure
+
+Organize your secrets in a structured way:
+
+```
+vault/
+└── secrets/
+    ├── database/
+    │   ├── prod-db.json
+    │   └── staging-db.json
+    ├── api/
+    │   ├── google-api.json
+    │   └── payment-gateway.json
+    └── certificates/
+        └── tls-keys.json
+```
+
+The `vault-secrets-loader.sh` script will:
+1. Read all JSON files recursively from the secrets directory
+2. Load them into Vault's KV store with paths matching the directory structure
+3. Apply proper permissions based on the configured policies
+
+### Accessing Loaded Secrets
+
+Once loaded, secrets will be available in Vault at paths like:
+- `kv/data/services/database/prod-db`
+- `kv/data/services/api/google-api`
+
+Your services can access these using the Vault client libraries or HTTP API as shown in the examples below.
+
+## Advanced Vault Features
+
+### Dynamic Database Credentials
+
+Generate temporary database credentials on-demand:
+
+```bash
+# Enable the database secrets engine
+vault secrets enable database
+
+# Configure a database connection
+vault write database/config/my-database \
+  plugin_name=mysql-database-plugin \
+  connection_url="{{username}}:{{password}}@tcp(db:3306)/" \
+  allowed_roles="readonly" \
+  username="root" \
+  password="rootpassword"
+
+# Create a role with limited permissions
+vault write database/roles/readonly \
+  db_name=my-database \
+  creation_statements="CREATE USER '{{name}}'@'%' IDENTIFIED BY '{{password}}';GRANT SELECT ON *.* TO '{{name}}'@'%';" \
+  default_ttl="1h" \
+  max_ttl="24h"
+```
+
+### Transit Encryption Engine
+
+Encrypt data without handling encryption keys:
+
+```bash
+# Enable the transit engine
+vault secrets enable transit
+
+# Create a named encryption key
+vault write -f transit/keys/my-key
+
+# Encrypt data
+curl -X POST -H "X-Vault-Token: $VAULT_TOKEN" \
+  --data '{"plaintext":"SGVsbG8gV29ybGQ="}' \
+  http://vault:8200/v1/transit/encrypt/my-key
+```
+
+### Response Wrapping
+
+Securely transmit secrets between services:
+
+```bash
+# Wrap a secret for secure transmission
+curl -X POST -H "X-Vault-Token: $VAULT_TOKEN" \
+  -H "X-Vault-Wrap-TTL: 300" \
+  http://vault:8200/v1/kv/data/secret-path
+
+# The recipient unwraps to get the actual secret
+curl -X POST -H "X-Vault-Token: $RECIPIENT_TOKEN" \
+  --data '{"token":"WRAP_TOKEN"}' \
+  http://vault:8200/v1/sys/wrapping/unwrap
+```
 
 ## Using Traefik Docker Labels
 
@@ -436,52 +704,75 @@ public class Startup
 }
 ```
 
-## Integration with Traefik
+## Accessing Vault Secrets from Services
 
-After registering your service with Consul, integrate it with Traefik by using Consul catalog configuration. Create a middleware and router configuration in Consul:
+### Using the Vault HTTP API
 
-```bash
-# Create a router for your service
-curl -X PUT -d '{
-  "http": {
-    "routers": {
-      "my-service-router": {
-        "entryPoints": ["web"],
-        "rule": "PathPrefix(`/my-service`)",
-        "service": "my-service",
-        "middlewares": ["rate-limit", "secure-headers"]
+For direct HTTP access:
+
+```javascript
+// Node.js example
+const axios = require('axios');
+
+async function getSecretFromVault() {
+  try {
+    const response = await axios.get('http://vault:8200/v1/kv/data/services/database', {
+      headers: {
+        'X-Vault-Token': process.env.VAULT_TOKEN
       }
-    }
+    });
+    
+    return response.data.data.data;
+  } catch (error) {
+    console.error('Error retrieving secret:', error);
+    throw error;
   }
-}' http://consul-server:8500/v1/kv/traefik/http/routers/my-service-router
-
-# Create a service backend for your Consul service
-curl -X PUT -d '{
-  "http": {
-    "services": {
-      "my-service": {
-        "loadBalancer": {
-          "servers": [
-            {
-              "url": "http://my-service:8080"
-            }
-          ]
-        }
-      }
-    }
-  }
-}' http://consul-server:8500/v1/kv/traefik/http/services/my-service
+}
 ```
 
-Alternatively, use the Traefik Consul Catalog provider (already configured) which will automatically detect services registered in Consul with the appropriate tags:
+### Using Official Vault Clients
+
+Most languages have official Vault clients:
+
+#### Java
 
 ```java
-// When registering your service, add specific tags for Traefik
-service.setTags(Arrays.asList(
-    "traefik.enable=true",
-    "traefik.http.routers.my-service.rule=PathPrefix(`/my-service`)",
-    "traefik.http.services.my-service.loadbalancer.server.port=8080"
-));
+import io.github.jopenlibs.vault.Vault;
+import io.github.jopenlibs.vault.VaultConfig;
+import io.github.jopenlibs.vault.response.LogicalResponse;
+
+// Create Vault client
+final VaultConfig config = new VaultConfig()
+    .address("http://vault:8200")
+    .token(System.getenv("VAULT_TOKEN"))
+    .build();
+
+final Vault vault = new Vault(config);
+
+// Read secret
+final LogicalResponse response = vault.logical()
+    .read("kv/data/services/database");
+
+final String username = response.getData().get("data").get("username").asText();
+final String password = response.getData().get("data").get("password").asText();
+```
+
+#### Python
+
+```python
+import hvac
+
+# Create client and authenticate
+client = hvac.Client(url='http://vault:8200', token=os.environ['VAULT_TOKEN'])
+
+# Read secret
+secret_response = client.secrets.kv.v2.read_secret_version(
+    path='services/database',
+    mount_point='kv'
+)
+
+username = secret_response['data']['data']['username']
+password = secret_response['data']['data']['password']
 ```
 
 ## Security Considerations
@@ -502,6 +793,7 @@ service.setTags(Arrays.asList(
 - Enable Consul ACLs in production
 - Secure the Traefik dashboard with authentication
 - Use IP whitelisting for admin interfaces
+- Implement Vault policies for fine-grained access control
 
 ## Monitoring and Maintenance
 
@@ -526,330 +818,188 @@ docker exec consul-server consul snapshot save /consul/data/backup.snap
 docker cp consul-server:/consul/data/backup.snap ./backup.snap
 ```
 
-## Advanced Configuration
+### Manually Loading Secrets into Vault
 
-## Customizing Middleware
-
-There are multiple ways to customize middleware in this architecture:
-
-### 1. Using Consul KV Store
-
-To add custom middleware configurations to Consul:
+Besides the automatic loading done by the `vault-secrets-loader.sh` script, you can manually add secrets to Vault:
 
 ```bash
-# Register a custom middleware
-curl -X PUT -d '{
-  "stripPrefix": {
-    "prefixes": ["/api"],
-    "forceSlash": false
-  }
-}' http://consul-server:8500/v1/kv/traefik/http/middlewares/my-strip-prefix/
+# Set VAULT_ADDR and VAULT_TOKEN environment variables
+export VAULT_ADDR=http://localhost:8200
+export VAULT_TOKEN=$(cat ./vault/keys/root-token.txt | awk '{print $3}')
 
-# Apply it to a service using labels
-# traefik.http.routers.my-service.middlewares=my-strip-prefix@consul
+# Add a simple secret
+vault kv put kv/services/api/mailserver \
+  host=smtp.example.com \
+  port=587 \
+  username=mailer@example.com \
+  password=mailpassword123
+
+# Add a secret from a JSON file
+vault kv put kv/services/database/analytics @analytics-db.json
+
+# Read a secret
+vault kv get kv/services/api/mailserver
+
+# Update an existing secret (only changes specified fields)
+vault kv patch kv/services/api/mailserver \
+  password=newpassword456
 ```
 
-### 2. Modifying the Registration Script
+### Backing Up Vault Data
 
-For persistent middleware, modify the `register-traefik-config-to-consul.sh` script:
+Back up Vault's encrypted data:
 
 ```bash
-# Add to the script
-echo "Registering custom-auth middleware..."
-curl -X PUT -d '{
-  "basicAuth": {
-    "users": ["user:$apr1$xyz..."],
-    "realm": "MyRealm"
-  }
-}' http://consul-server:8500/v1/kv/traefik/http/middlewares/custom-auth/
+# Create a snapshot
+vault operator raft snapshot save /vault/file/vault-backup.snap
+
+# Copy the snapshot
+docker cp vault:/vault/file/vault-backup.snap ./vault-backup.snap
 ```
 
-Then restart the registration container:
+## Vault vs Environment Variables in This Architecture
 
-```bash
-docker-compose restart traefik-consul-register
-```
+### Role Separation
 
-### 3. Programmatic Middleware Registration
+In this architecture, there's a clear separation of concerns between Vault and the `.env` file:
 
-You can also register middlewares programmatically from your services:
+| `.env` File (Root Directory) | HashiCorp Vault |
+|------------------------------|-----------------|
+| Service configuration parameters | Sensitive credentials and secrets |
+| Container startup environment variables | API keys, tokens, and passwords |
+| Port mappings and network settings | Database connection strings |
+| Feature flags and operational modes | Encryption keys |
+| Log levels and debugging options | TLS certificates and private keys |
+| Non-sensitive configuration values | OAuth client secrets |
 
-#### Java Example
+### `.env` File Usage
 
-```java
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.web.client.RestTemplate;
-import java.util.Base64;
+The `.env` file in the root directory is used for:
+- Defining ports for services (e.g., `TRAEFIK_HTTP_PORT=80`)
+- Setting log levels (e.g., `CONSUL_LOG_LEVEL=INFO`)
+- Configuring feature flags (e.g., `TRAEFIK_DASHBOARD_ENABLED=true`)
+- Defining container startup parameters
+- Setting network configuration
+- Controlling which components are enabled
 
-public class MiddlewareRegistration {
-    
-    public void registerMiddleware() {
-        RestTemplate restTemplate = new RestTemplate();
-        
-        // Create middleware configuration
-        String middlewareJson = "{"
-            + "\"circuitBreaker\": {"
-            + "  \"expression\": \"NetworkErrorRatio() > 0.5\","
-            + "  \"fallbackDuration\": \"10s\""
-            + "}"
-            + "}";
-        
-        // Convert to base64 for Consul KV storage
-        String encodedValue = Base64.getEncoder().encodeToString(middlewareJson.getBytes());
-        
-        // Prepare request
-        HttpHeaders headers = new HttpHeaders();
-        headers.set("Content-Type", "application/json");
-        HttpEntity<String> entity = new HttpEntity<>("{\"Value\":\"" + encodedValue + "\"}", headers);
-        
-        // Send to Consul
-        restTemplate.put(
-            "http://consul-server:8500/v1/kv/traefik/http/middlewares/java-circuit-breaker", 
-            entity
-        );
-        
-        System.out.println("Middleware registered successfully");
-    }
-}
-```
+These values are not considered sensitive and are primarily used to configure how services start up and communicate with each other.
 
-#### Node.js Example
+### Vault Usage
 
-```javascript
-const axios = require('axios');
+HashiCorp Vault is exclusively used for:
+- Storing sensitive credentials that services need at runtime
+- Managing API keys for external services
+- Storing encryption keys used by applications
+- Handling credentials that would pose a security risk if leaked
+- Providing dynamic, short-lived credentials
+- Managing certificates and private keys
 
-async function registerMiddleware() {
-    const middlewareConfig = {
-        rateLimit: {
-            average: 50,
-            burst: 100,
-            period: "1s"
-        }
-    };
-    
-    // Consul requires Base64 encoding for values
-    const encodedConfig = Buffer.from(JSON.stringify(middlewareConfig)).toString('base64');
-    
-    try {
-        await axios.put(
-            'http://consul-server:8500/v1/kv/traefik/http/middlewares/node-rate-limit',
-            { Value: encodedConfig },
-            { headers: { 'Content-Type': 'application/json' } }
-        );
-        
-        console.log('Middleware registered successfully');
-    } catch (error) {
-        console.error('Error registering middleware:', error);
-    }
-}
+### Comparing Secret Storage Approaches
 
-registerMiddleware();
-```
+| Feature | `.env` File (For Configuration) | HashiCorp Vault (For Secrets) |
+|---------|--------------------------------|-------------------------------|
+| **Security** | Minimal - stored as plaintext | High - encrypted at rest, in transit, and in memory |
+| **Access Control** | None - accessible to anyone with file access | Fine-grained with policies |
+| **Auditability** | No tracking of changes or access | Comprehensive audit logging |
+| **Rotation** | Requires manual file edits and restarts | Can be rotated without restarts |
+| **Revocation** | Requires file edits and restarts | Immediate revocation possible |
+| **Integration** | Simple environment variable loading | More complex API-based access |
+| **Dynamic Secrets** | Not supported | Fully supported |
+| **Disaster Recovery** | Manual backup of files | Automated backup and recovery |
 
-#### Golang Example
+### Implementation Pattern in This Architecture
 
-```go
-package main
+This architecture implements the following pattern:
+1. **`.env` file** contains all service configuration parameters and non-sensitive settings needed at container startup time
+2. **Vault** stores all sensitive information that services need to access at runtime
+3. **Services** read their startup configuration from environment variables, then authenticate to Vault to obtain sensitive credentials
 
-import (
-    "bytes"
-    "encoding/json"
-    "fmt"
-    "net/http"
-)
+This separation ensures that configuration management and secret management are handled through appropriate channels with the right level of security for each.
 
-func registerMiddleware() error {
-    // Create middleware configuration
-    type ipWhitelistConfig struct {
-        SourceRange []string `json:"sourceRange"`
-    }
-    
-    type middlewareConfig struct {
-        IPWhiteList ipWhitelistConfig `json:"ipWhiteList"`
-    }
-    
-    config := middlewareConfig{
-        IPWhiteList: ipWhitelistConfig{
-            SourceRange: []string{"192.168.1.0/24", "127.0.0.1/32"},
-        },
-    }
-    
-    // Marshal to JSON
-    configBytes, err := json.Marshal(config)
-    if err != nil {
-        return fmt.Errorf("failed to marshal config: %v", err)
-    }
-    
-    // Send to Consul
-    req, err := http.NewRequest(
-        "PUT",
-        "http://consul-server:8500/v1/kv/traefik/http/middlewares/go-ip-whitelist",
-        bytes.NewBuffer(configBytes),
-    )
-    if err != nil {
-        return fmt.Errorf("failed to create request: %v", err)
-    }
-    
-    req.Header.Set("Content-Type", "application/json")
-    
-    client := &http.Client{}
-    resp, err := client.Do(req)
-    if err != nil {
-        return fmt.Errorf("failed to send request: %v", err)
-    }
-    defer resp.Body.Close()
-    
-    if resp.StatusCode != http.StatusOK {
-        return fmt.Errorf("failed to register middleware: %v", resp.Status)
-    }
-    
-    fmt.Println("Middleware registered successfully")
-    return nil
-}
-```
+## Disabling Vault
 
-#### C# Example
+In some cases, you might want to run the architecture without Vault, either for simpler development environments or when using alternative secret management solutions.
 
-```csharp
-using System;
-using System.Net.Http;
-using System.Text;
-using System.Text.Json;
-using System.Threading.Tasks;
+### Option 1: Comment Out Vault Services
 
-public class MiddlewareRegistration
-{
-    public async Task RegisterMiddleware()
-    {
-        var middlewareConfig = new
-        {
-            errors = new
-            {
-                status = new[] { "500-599" },
-                service = "error-service",
-                query = "/error.html"
-            }
-        };
-        
-        var jsonContent = JsonSerializer.Serialize(middlewareConfig);
-        var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
-        
-        using var httpClient = new HttpClient();
-        var response = await httpClient.PutAsync(
-            "http://consul-server:8500/v1/kv/traefik/http/middlewares/dotnet-error-pages",
-            content
-        );
-        
-        if (response.IsSuccessStatusCode)
-        {
-            Console.WriteLine("Middleware registered successfully");
-        }
-        else
-        {
-            Console.WriteLine($"Failed to register middleware: {response.StatusCode}");
-        }
-    }
-}
-```
-
-### 4. Using Docker Labels (for Simple Middlewares)
-
-For some simple middlewares, you can define them directly with Docker labels:
+Edit the `docker-compose.yaml` file and comment out the Vault-related services:
 
 ```yaml
 services:
-  my-service:
-    # ... other configuration
-    labels:
-      # Define the middleware directly
-      - "traefik.http.middlewares.my-retry.retry.attempts=3"
-      - "traefik.http.middlewares.my-retry.retry.initialInterval=100ms"
-      # Apply it to the router
-      - "traefik.http.routers.my-service.middlewares=my-retry@docker"
+  # Other services remain unchanged...
+  
+  # Comment out Vault services
+  # vault:
+  #   image: hashicorp/vault:1.16
+  #   container_name: vault
+  #   # ... rest of the configuration ...
+  
+  # vault-init:
+  #   image: hashicorp/vault:1.19
+  #   container_name: vault-init
+  #   # ... rest of the configuration ...
 ```
 
-### 5. Advanced Custom Middleware (Traefik Plugins)
+### Option 2: Create a Minimal Docker Compose File
 
-For more advanced use cases, Traefik supports custom plugins. These require modifying the Traefik configuration:
-
-1. Create a plugin in Go following the Traefik plugin architecture
-2. Publish it to GitHub
-3. Update the Traefik static configuration to include your plugin:
+Create a simplified `docker-compose-no-vault.yaml` file:
 
 ```yaml
-# traefik.yml
-experimental:
-  plugins:
-    my-plugin:
-      moduleName: "github.com/username/my-traefik-plugin"
-      version: "v0.1.0"
+services:
+  consul-server:
+    # Consul configuration unchanged
+    # ...
+
+  traefik:
+    # Traefik configuration unchanged
+    # ...
+
+  traefik-consul-register:
+    # Registration script configuration unchanged
+    # ...
+
+networks:
+  consul-net:
+    driver: bridge
+  traefik-net:
+    driver: bridge
+
+volumes:
+  consul-data:
+  traefik-net:
 ```
 
-Then use the plugin in your dynamic configuration:
-
-```yaml
-http:
-  middlewares:
-    my-custom-middleware:
-      plugin:
-        my-plugin:
-          option1: value1
-          option2: value2
-```
-
-### Scaling Services
-
-Individual services can be scaled with Docker Compose:
+Use this file with:
 
 ```bash
-cd services/my-service
-docker-compose up -d --scale my-service=3
+docker-compose -f docker-compose-no-vault.yaml up -d
 ```
 
-Traefik will automatically load-balance between instances.
+### Option 3: Environment Variable Toggle
 
-## Troubleshooting
+1. Update `ENABLE_VAULT` variable to your `.env` file:
+   ```
+   ENABLE_VAULT=false
+   ```
 
-### Check Logs
+2. Modify your deployment scripts to check this variable and use the appropriate configuration.
 
-```bash
-# Check Consul logs
-docker logs consul-server
+### Handling Secrets Without Vault
 
-# Check Traefik logs
-docker logs traefik
+When running without Vault, you'll need an alternative way to manage secrets:
 
-# Check middleware registration logs
-docker logs traefik-consul-register
-```
+1. **Environment Variables**: Store secrets in `.env` files or export them directly
+   ```bash
+   echo "DB_PASSWORD=mypassword" >> .env
+   ```
 
-### Common Issues
+2. **Config Files**: Use configuration files with appropriate permissions
+   ```bash
+   echo '{"username": "admin", "password": "secret"}' > config/credentials.json
+   chmod 600 config/credentials.json
+   ```
 
-1. **Service not accessible through Traefik**
-   - Ensure the service is in the correct network
-   - Verify labels are correctly set
-   - Check Traefik dashboard for routing issues
-
-2. **Middleware not applying**
-   - Verify the middleware was registered correctly in Consul
-   - Check the middleware name in Traefik labels
-
-3. **Container health checks failing**
-   - Verify the service is ready to accept connections
-   - Check container logs for startup issues
-
-## Extending the Template
-
-This template provides the core infrastructure. To fully implement the architecture described in the Project Architecture Document, consider adding:
-
-- **RabbitMQ** for asynchronous communication
-- **Linkerd** for service mesh capabilities
-- **HashiCorp Vault** for secret management
-- **Prometheus and Jaeger** for monitoring and tracing
-- **Redis** for caching
-- **MinIO** for object storage
-- **ScyllaDB** for high-performance data storage
+Remember that these alternatives generally offer less security than Vault, so assess your security requirements accordingly.
 
 ## Production Deployment Checklist
 
@@ -863,9 +1013,13 @@ Before deploying to production:
 - [ ] Implement proper logging
 - [ ] Test failover scenarios
 - [ ] Document the deployment process
+- [ ] Enable Consul ACLs
+- [ ] Switch Vault to non-dev mode (or ensure alternative secret management is secure)
+- [ ] Implement proper auto-unsealing for Vault (if using Vault)
 
 ## References
 
 - [Docker Compose Documentation](https://docs.docker.com/compose/)
 - [Traefik Documentation](https://doc.traefik.io/traefik/)
 - [Consul Documentation](https://www.consul.io/docs)
+- [Vault Documentation](https://www.vaultproject.io/docs)

@@ -95,6 +95,7 @@ services:
       - VAULT_LOG_LEVEL=${VAULT_LOG_LEVEL:-INFO}
       - VAULT_ADDR=http://0.0.0.0:8200
       - VAULT_API_ADDR=http://0.0.0.0:8200
+      - ENABLE_VAULT=${ENABLE_VAULT}
     cap_add:
       - IPC_LOCK
     command: "server"
