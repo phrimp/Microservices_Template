@@ -45,6 +45,7 @@ services:
       - TRAEFIK_PROVIDERS_DOCKER=true
       - TRAEFIK_PROVIDERS_DOCKER_ENDPOINT=unix:///var/run/docker.sock
       - TRAEFIK_PROVIDERS_DOCKER_EXPOSEDBYDEFAULT=false
+      - TRAEFIK_PROVIDERS_DOCKER_NETWORK=microservices_template_traefik-net
       - TRAEFIK_PROVIDERS_CONSUL=true
       - TRAEFIK_PROVIDERS_CONSUL_ENDPOINTS=http://consul-server:8500
       - TRAEFIK_PROVIDERS_CONSUL_ROOTKEY=${TRAEFIK_CONSUL_ROOTKEY:-traefik}
@@ -80,11 +81,74 @@ services:
     networks:
       - consul-net
 
+# HashiCorp Vault for secret management
+  vault:
+    image: hashicorp/vault:1.16
+    container_name: vault
+    hostname: vault
+    restart: unless-stopped
+    ports:
+      - "${VAULT_PORT:-8200}:8200"
+    volumes:
+      - ./vault/config:/vault/config
+      - vault-file:/vault/file
+    environment:
+      - VAULT_LOG_LEVEL=${VAULT_LOG_LEVEL:-INFO}
+      - VAULT_ADDR=http://0.0.0.0:8200
+      - VAULT_API_ADDR=http://0.0.0.0:8200
+      - ENABLE_VAULT=${ENABLE_VAULT}
+    cap_add:
+      - IPC_LOCK
+    command: "server"
+    networks:
+      - consul-net
+      - traefik-net
+    depends_on:
+      consul-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--spider", "http://127.0.0.1:8200/v1/sys/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  vault-init:
+    image: hashicorp/vault:1.19
+    container_name: vault-init
+    user: root
+    volumes:
+      - ./vault/scripts:/scripts
+      - ./.env:/.env
+      - vault-file:/vault/file
+      - ./vault/keys:/vault/keys
+      - ./vault/secrets:/vault/secrets
+    environment:
+      - VAULT_ADDR=http://vault:8200
+      - VAULT_DEV_ROOT_TOKEN_ID=${VAULT_DEV_ROOT_TOKEN_ID:-root}
+    entrypoint: >
+      sh -c "
+        apk add --no-cache curl jq bash dos2unix &&
+        mkdir -p /vault/file /vault/keys &&
+        cd /scripts &&
+        dos2unix init-vault.sh &&
+        dos2unix vault-secrets-loader.sh &&
+        chmod +x init-vault.sh &&
+        chmod +x vault-secrets-loader.sh &&
+        bash ./init-vault.sh
+      "
+    networks:
+      - consul-net
+    depends_on:
+      - vault
+
 networks:
   consul-net:
     driver: bridge
   traefik-net:
     driver: bridge
+    name: microservices_template_traefik-net
 
 volumes:
   consul-data:
+  vault-file:
+  vault-logs:
