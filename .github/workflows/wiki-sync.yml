@@ -18,12 +18,12 @@ jobs:
           fetch-depth: 0  # Required for history
           path: source-code
 
-      - name: Checkout wiki
-        uses: actions/checkout@v3
+      - name: Checkout Wiki
+        uses: actions/checkout@v4
         with:
-          repository: ${{ github.repository }}
+          repository: ${{github.repository}}.wiki
           path: wiki
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.WIKI_TOKEN }} 
 
       - name: Sync wiki content
         run: |
