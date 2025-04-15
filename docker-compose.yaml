@@ -81,65 +81,83 @@ services:
     networks:
       - consul-net
 
-# HashiCorp Vault for secret management
-  vault:
-    image: hashicorp/vault:1.16
-    container_name: vault
-    hostname: vault
+  # MongoDB Service
+  mongodb:
+    image: mongo:latest
+    container_name: mongodb
     restart: unless-stopped
     ports:
-      - "${VAULT_PORT:-8200}:8200"
-    volumes:
-      - ./vault/config:/vault/config
-      - vault-file:/vault/file
+      - "${MONGODB_PORT:-27017}:27017"
     environment:
-      - VAULT_LOG_LEVEL=${VAULT_LOG_LEVEL:-INFO}
-      - VAULT_ADDR=http://0.0.0.0:8200
-      - VAULT_API_ADDR=http://0.0.0.0:8200
-      - ENABLE_VAULT=${ENABLE_VAULT}
-    cap_add:
-      - IPC_LOCK
-    command: "server"
+      MONGO_INITDB_ROOT_USERNAME: ${MONGODB_USERNAME:-root}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGODB_PASSWORD:-example}
+    volumes:
+      - mongodb_data:/data/db
+      - ./logs/mongodb:/var/log/mongodb
+    command: mongod --logpath /var/log/mongodb/mongodb.log --logRotate reopen --logappend
     networks:
       - consul-net
       - traefik-net
-    depends_on:
-      consul-server:
-        condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--spider", "http://127.0.0.1:8200/v1/sys/health"]
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
       interval: 10s
       timeout: 5s
       retries: 3
+    labels:
+      - "traefik.enable=false"
 
-  vault-init:
-    image: hashicorp/vault:1.19
-    container_name: vault-init
-    user: root
+  # Redis Service
+  redis:
+    image: redis:latest
+    container_name: redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
-      - ./vault/scripts:/scripts
-      - ./.env:/.env
-      - vault-file:/vault/file
-      - ./vault/keys:/vault/keys
-      - ./vault/secrets:/vault/secrets
+      - redis_data:/data
+      - ./logs/redis:/var/log/redis
     environment:
-      - VAULT_ADDR=http://vault:8200
-      - VAULT_DEV_ROOT_TOKEN_ID=${VAULT_DEV_ROOT_TOKEN_ID:-root}
-    entrypoint: >
-      sh -c "
-        apk add --no-cache curl jq bash dos2unix &&
-        mkdir -p /vault/file /vault/keys &&
-        cd /scripts &&
-        dos2unix init-vault.sh &&
-        dos2unix vault-secrets-loader.sh &&
-        chmod +x init-vault.sh &&
-        chmod +x vault-secrets-loader.sh &&
-        bash ./init-vault.sh
-      "
+      - REDIS_LOG_LEVEL=${REDIS_LOG_LEVEL:-notice}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-example}
     networks:
       - consul-net
-    depends_on:
-      - vault
+      - traefik-net
+    command: redis-server --requirepass ${REDIS_PASSWORD:-example} --loglevel ${REDIS_LOG_LEVEL:-notice} --logfile /var/log/redis/redis.log
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-example}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    labels:
+      - "traefik.enable=false"
+
+  # MinIO Object Storage
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    restart: unless-stopped
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_LOGGER_FILE: "/var/log/minio"
+    volumes:
+      - minio_data:/data
+      - ./logs/minio:/var/log/minio
+    command: server /data --console-address ":9001" --address ":9000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - consul-net
+      - traefik-net
+    labels:
+      - "traefik.enable=false"
+
 
 networks:
   consul-net:
@@ -150,5 +168,6 @@ networks:
 
 volumes:
   consul-data:
-  vault-file:
-  vault-logs:
+  mongodb_data:
+  redis_data:
+  minio_data:
